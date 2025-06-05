@@ -1,0 +1,700 @@
+Console:
+Hirdetes.cs:
+
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+
+namespace ConsoleApp1
+{
+    internal class Hirdetes
+    {
+        public int id { get; set; }
+        public string marka { get; set; }
+        public string modell { get; set; }
+        public int evjarat { get; set; }
+        public int vetelar { get; set; }
+        public int kmallas { get; set; }
+        public int hengerurtartalom { get; set; }
+        public Kategoria Kategoria { get; set; }
+        public Elado Elado { get; set; }
+
+        public Hirdetes(string oneCar)
+        {
+            string[] data = oneCar.Split(';');
+            this.id = Convert.ToInt32(data[0]);
+            this.marka = data[1];
+            this.modell = data[2];
+            this.evjarat = Convert.ToInt32(data[3]);
+            this.vetelar = Convert.ToInt32(data[4]);
+            this.kmallas = Convert.ToInt32(data[5]);
+            this.hengerurtartalom = Convert.ToInt32(data[6]);
+            this.Kategoria = new Kategoria() { id = Convert.ToInt32(data[7]), nev = data[8] };
+            this.Elado = new Elado() { id = Convert.ToInt32(data[9]), nev = data[10], telszam = data[11] };
+        }
+
+        public static List<Hirdetes> loadCsvFile(string filename)
+        {
+            List<Hirdetes> listings = new List<Hirdetes>();
+            foreach (string oneCar in File.ReadAllLines(filename).Skip(1))
+            {
+                listings.Add(new Hirdetes(oneCar));
+            }
+            return listings;
+        }
+
+        public double evesfutastelj()
+        {
+            return (double)this.kmallas / (2025 - this.evjarat);
+        }
+    }
+}
+
+
+
+Program.cs:
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.IO;
+
+namespace ConsoleApp1
+{
+    internal class Program
+    {
+        static void Main(string[] args)
+        {
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+            List<Hirdetes> listings = Hirdetes.loadCsvFile("jarmu.csv");
+            foreach (Hirdetes x in listings)
+            {
+                Console.WriteLine($"{x.id}, {x.marka}, {x.modell}, {x.evjarat}, {x.vetelar}, {x.kmallas}, {x.hengerurtartalom}, {x.Kategoria.id}, {x.Kategoria.nev}, {x.Elado.id}, {x.Elado.nev}, {x.Elado.telszam}");
+            }
+
+            int total = 0;
+            int count = 0;
+            foreach (Hirdetes x in listings)
+            {
+                if (x.Kategoria.nev == "Személyautó")
+                {
+                    total = total + x.vetelar;
+                    count++;
+                }
+            }
+            Console.WriteLine("\nSzemélyautók átlagos vételára: {0:F2}", total / count);
+
+            int min = int.MaxValue;
+            Hirdetes minListing = null;
+            foreach (Hirdetes oneCar in listings)
+            {
+                if (oneCar.evesfutastelj() < min)
+                {
+                    minListing = oneCar;
+                }
+            }
+            Console.WriteLine($"\n\tHírdető neve: {minListing.Elado.nev}");
+            Console.WriteLine($"\tTelefonszáma: {minListing.Elado.telszam}");
+            Console.WriteLine($"\tAutó márkája: {minListing.marka}");
+            Console.WriteLine($"\tAutó modellje: {minListing.modell}");
+            Console.WriteLine($"\tAutó éves futásteljesítménye: {minListing.evesfutastelj()}");
+
+            Console.ReadKey();
+        }
+    }
+}
+
+
+
+Web API:
+
+Kategoriak.cs:
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace WebApplication2.Models
+{
+    [Table("kategoriak")]
+    public class Kategoriakmodell
+    {
+        [Key]
+        public int id { get; set; }
+        public string kategorianev { get; set; }
+        public ICollection<Jarmuvekmodell> car { get; set; }
+    }
+}
+
+
+Jarmuvekmodell.cs:
+using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
+
+namespace WebApplication2.Models
+{
+    [Table("jarmuvek")]
+    public class Jarmuvekmodell
+    {
+        [Key]
+        public int id { get; set; }
+        public string marka { get; set; }
+        public string modell { get; set; }
+        public int evjarat { get; set; }
+        public int vetelar { get; set; }
+        public int kmallas { get; set; }
+        public int kategoriaid { get; set; }
+        public int hengerurtartalom { get; set; }
+        [ForeignKey("kategoriaid")]
+        public Kategoriakmodell category { get; set; }
+    }
+}
+
+
+AppContext.cs:
+using Microsoft.EntityFrameworkCore;
+using WebApplication2.Models;
+
+namespace WebApplication2
+{
+    public class AppContext : DbContext
+    {
+        public DbSet<Kategoriakmodell> Category { get; set; }
+        public DbSet<Jarmuvekmodell> Car { get; set; }
+
+        protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            optionsBuilder.UseMySQL("server=localhost;database=jarmu;uid=root;pwd=;charset=utf8;");
+        }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<Jarmuvekmodell>()
+                .HasOne(k => k.category)
+                .WithMany(p => p.car)
+                .HasForeignKey(k => k.kategoriaid);
+        }
+    }
+}
+
+
+Program.cs:
+builder.Services.AddDbContext<AppContext>();
+
+Controller.cs:
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
+using WebApplication2.Models;
+
+namespace WebApplication2.Controllers
+{
+    [ApiController]
+    public class BackendController : ControllerBase
+    {
+        private readonly AppContext appContext;
+        public BackendController(AppContext appContext)
+        {
+            this.appContext = appContext;
+        }
+
+        [HttpGet("api/jarmuvek")]
+        public IActionResult GetAllCars()
+        {
+            var selectedCars = appContext.Set<Jarmuvekmodell>()
+                .Include(c => c.category)
+                .Select(i => new
+                {
+                    i.id,
+                    i.marka,
+                    i.modell,
+                    i.evjarat,
+                    i.vetelar,
+                    i.kmallas,
+                    i.hengerurtartalom,
+                    kategoria = new
+                    {
+                        i.category.id,
+                        i.category.kategorianev
+                    },
+                })
+                .ToList();
+
+            return Ok(selectedCars);
+        }
+
+        [HttpPost("api/jarmu")]
+        public IActionResult PostNewCar(dynamic data)
+        {
+            try
+            {
+                var json = JsonSerializer.Deserialize<Jarmuvekmodell>(
+                    data.ToString(),
+                    new JsonSerializerOptions()
+                    {
+                        PropertyNameCaseInsensitive = true
+                    }
+                );
+
+                appContext.Set<Jarmuvekmodell>().Add(json);
+                appContext.SaveChanges();
+                return StatusCode(200, new
+                {
+                    json.id
+                });
+            }
+            catch
+            {
+                return BadRequest("Error");
+            }
+        }
+
+        [HttpDelete("api/jarmu/{id}")]
+        public IActionResult Torol(int id)
+        {
+            var json = appContext.Set<Jarmuvekmodell>().FirstOrDefault(i => i.id == id);
+            if (json == null)
+            {
+                return NotFound();
+            }
+            appContext.Set<Jarmuvekmodell>().Remove(json);
+            appContext.SaveChanges();
+            return NoContent();
+        }
+    }
+}
+
+Vicci wpf:
+xaml:
+<Window x:Class="WpfApp1.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:WpfApp1"
+        mc:Ignorable="d"
+        Title="MainWindow" Height="450" Width="800">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="2*"/>
+        </Grid.ColumnDefinitions>
+
+        <ListBox Grid.Column="0" Name="Elado">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Label Content="{Binding nev}"/>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <StackPanel Grid.Column="1" DataContext="{Binding ElementName=Elado, Path=SelectedItem}">
+            <StackPanel Orientation="Horizontal">
+                <Label Content="Eladó neve:"/>
+                <Label Content="{Binding nev}"/>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal">
+                <Label Content="Eladó telefonszáma:"/>
+                <Label Content="{Binding telszam}"/>
+            </StackPanel>
+
+            <Button Content="Hírdetések betöltése" Click="Button_Click"/>
+
+            <StackPanel Orientation="Horizontal">
+                <Label Content="Hírdetések száma:"/>
+                <Label Content="0" Name="hirdetesekszama"/>
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</Window>
+
+cs:
+using MySql.Data.MySqlClient;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Navigation;
+using System.Windows.Shapes;
+
+namespace WpfApp1
+{
+    /// <summary>
+    /// Interaction logic for MainWindow.xaml
+    /// </summary>
+    public partial class MainWindow : Window
+    {
+        List<Elado> sellers = new List<Elado>();
+        MySqlConnection con = new MySqlConnection("server=localhost;user=root;password=;database=jarmuwpf;port=3306");
+        public MainWindow()
+        {
+            InitializeComponent();
+            con.Open();
+            string query = "SELECT id, nev, telszam FROM elado";
+            MySqlCommand cmd = new MySqlCommand(query, con);
+            MySqlDataReader rdr = cmd.ExecuteReader();
+            while (rdr.Read())
+            {
+                sellers.Add(new Elado()
+                {
+                    id = Convert.ToInt32(rdr["id"].ToString()),
+                    nev = rdr["nev"].ToString(),
+                    telszam = rdr["telszam"].ToString()
+                });
+            }
+            rdr.Close();
+            con.Close();
+            this.Elado.ItemsSource = sellers;
+        }
+
+        private void Button_Click(object sender, RoutedEventArgs e)
+        {
+            con.Open();
+            string query = "SELECT COUNT(id) AS HirdetesekSzama FROM hirdetes WHERE eladoid = @eladoid";
+            MySqlCommand cmd = new MySqlCommand(query, con);
+            cmd.Parameters.Add(new MySqlParameter("@eladoid", (this.Elado.SelectedItem as Elado).id));
+
+            MySqlDataReader reader = cmd.ExecuteReader();
+            
+            reader.Read();
+            this.label1.Content = reader["HirdetesekSzama"].ToString();
+            reader.Close();
+            con.Close();
+        }
+    }
+}
+
+
+ajanlatok.html:
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Használtautó</title>
+    <link rel="stylesheet" href="dist/bootstrap/css/bootstrap.min.css">
+    <link rel="stylesheet" href="style.css">
+    <script src="ajanlatok.js" charset="utf-8"></script>
+</head>
+<body>
+    <div class="container">
+        <nav class="navbar navbar-expand-md navbar-light d-none d-md-block">
+            <div class="container-fluid">
+                <div class="collapse navbar-collapse">
+                    <ul class="navbar-nav mx-auto mb-2 mb-lg-0">
+                        <li class="nav-item">
+                            <a class="nav-link" aria-current="page" href="index.html">Kezdőlap</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link active" href="#">Jármű kínálat</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="ujhirdetes.html">Hirdetés feladása</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+        <h2 class="mb-4 text-center">Aktuális ajánlataink</h2>
+        <div class="row">
+            <div class="col-12 offset-md-1 col-md-10 offset-lg-0 col-lg-12 table-responsive">
+                  
+            <div class="d-md-table w-100" id="jarmu1">
+                <p>Az összes adat listázása:</p>
+            </div>
+            </div>
+           
+        </div>
+    </div>
+    <script src="dist/bootstrap/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+index.html:
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Használtautó</title>
+    <link rel="stylesheet" href="dist/bootstrap/css/bootstrap.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <nav class="navbar navbar-expand-md navbar-light d-none d-md-block">
+            <div class="container-fluid">
+                <div class="collapse navbar-collapse">
+                    <ul class="navbar-nav mx-auto mb-2 mb-lg-0">
+                        <li class="nav-item">
+                            <a class="nav-link active" aria-current="page" href="#">Kezdőlap</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="ajanlatok.html">Jármű kínálat</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="ujhirdetes.html">Hirdetés feladása</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+        <div class="start w-100">
+            <h1 class="text-center pt-2 pt-lg-4">Használtautó</h1>
+            <div class="row">
+                <div class="col-12 col-sm-6 text-center">
+                    <a class="btn btn-primary" href="ajanlatok.html">Nézze meg kínálatunkat!</a>
+                </div>
+                <div class="col-12 col-sm-6 text-center">
+                    <a class="btn btn-primary" href="ujhirdetes.html">Hirdessen nálunk!</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="dist/bootstrap/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+style.css:
+.start {
+    background-image: url('img/jarmu.jpg');
+    background-position: center;
+    background-size: cover;
+    min-height: 100vh;
+}
+
+@media (min-width: 768px) {
+    .start {
+        min-height: calc(100vh - 4rem);
+    }
+}
+
+.start .btn {
+    width: 14rem;
+}
+
+.start .row {
+    margin-top: 60vh;
+}
+
+@media (max-width: 575px) {
+    .start .row .col-12{
+        margin: 2vh 0;
+    }
+
+    .start .row {
+        margin-top: 35vh;
+    }
+
+    .start .row .btn {
+        min-width: 15rem;
+        font-size: 1rem;
+    }    
+}
+
+.start .row .btn {
+    min-width: calc(100% - 4rem);
+    font-size: 1.7vw;
+}
+
+.container {
+    background-color: rgb(217, 243, 240);
+    min-height: 100vh;
+}
+
+.container nav.navbar ul.navbar-nav li.nav-item a.active{
+    color: rgb(71, 71, 150);
+    font-weight: bold;
+}
+
+td,th{
+    text-align: center;
+}
+
+table {
+    width: 100%;
+    max-width: 100%;
+}
+
+@media (min-width: 768px) {
+    #jarmu1 table {
+        width: 100%;
+        max-width: 100%;
+        table-layout: auto; /* Engedi az oszlopok rugalmas elrendezését */
+    }
+
+    #jarmu1 {
+        overflow-x: auto; /* Elrejti a görgetősávot */
+    }
+}
+
+
+ujhirdetes.html:
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Használtautó</title>
+    <link rel="stylesheet" href="dist/bootstrap/css/bootstrap.min.css">
+    <link rel="stylesheet" href="style.css">
+    <script src="ujhirdetes.js" charset="utf-8"></script>
+
+</head>
+<body>
+    <div class="container">
+        <nav class="navbar navbar-expand-md navbar-light d-none d-md-block">
+            <div class="container-fluid">
+                <div class="collapse navbar-collapse">
+                    <ul class="navbar-nav mx-auto mb-2 mb-lg-0">
+                        <li class="nav-item">
+                            <a class="nav-link" aria-current="page" href="index.html">Kezdőlap</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" href="ajanlatok.html">Jármű kínálat</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link active" href="#">Hirdetés feladása</a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </nav>
+        <h2 class="mb-4 text-center">Új hirdetés elküldése</h2>
+        <div class="row">
+            <div class="offset-lg-3 offset-md-2 col-lg-6 col-md-8 col-12">
+                <form id="formom">
+                <div class="mb-3">
+                    <label for="id" class="form-label">ID</label>
+                    <input type="number" class="form-control" id="id">
+                </div>
+                <div class="mb-3">
+                    <label for="marka" class="form-label">Márka</label>
+                    <input type="text" class="form-control" id="marka">
+                </div>
+                <div class="mb-3">
+                    <label for="modell" class="form-label">Modell</label>
+                    <input type="text" class="form-control" id="modell">
+                </div>
+                <div class="mb-3">
+                    <label for="evjarat" class="form-label">Évjárat</label>
+                    <input type="number" class="form-control" id="evjarat">
+                </div>
+                <div class="mb-3">
+                    <label for="vetelar" class="form-label">Vételár</label>
+                    <input type="number" class="form-control" id="vetelar">
+                </div>
+                <div class="mb-3">
+                    <label for="kmallas" class="form-label">Kmállas</label>
+                    <input type="number" class="form-control" id="kmallas">
+                </div>
+                <div class="mb-3">
+                    <label for="hengerurtartalom" class="form-label">Hengerűrtartalom</label>
+                    <input type="number" class="form-control" id="hengerurtartalom">
+                </div>
+                <div class="mb-3">
+                    <label for="kategorianev" class="form-label">Kategórianév</label>
+                    <div id="jarmu21">
+                        <p>Kategória legördülő lista:</p>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="kategoriaid" class="form-label">Kategóriaid</label>
+                    <input type="number" class="form-control" id="kategoriaid">
+                </div>
+                <div class="mb-3 text-center">
+                    <input type="button" class="btn btn-primary px-5"value="Új jármű beszúrása" onclick="jarmu2()">
+                </div>
+                </form>
+            </div>
+        </div>
+    </div>
+   <script src="dist/bootstrap/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
+
+
+ujhirdetes.js:
+function jarmu2(){
+  var kivalasztottertek = document.getElementById("kategorialista").value;
+  alert(kivalasztottertek);
+  const form = document.getElementById("formom");
+  //if (form.sorsz.value!=""){
+  //  if(form.karton.value*1>0){
+  const formData = {
+    id: form.id.value*1,
+    marka: form.marka.value,
+    modell: form.modell.value,
+    evjarat: form.evjarat.value*1,
+    vetelar: form.vetelar.value*1,
+    kmallas: form.kmallas.value*1,
+    hengerurtartalom: form.hengerurtartalom.value*1,
+    kategoriaid: kivalasztottertek*1,
+    //kategoriaid: form.kategoriaid.value*1,
+  };
+  console.log(JSON.stringify(formData));
+  const xmlhttp = new XMLHttpRequest();
+  xmlhttp.onreadystatechange = function() {
+    if (xmlhttp.readyState == 4 && xmlhttp.status == 201) {
+      console.log("Sikeres POST kérés!");
+    } else if (xmlhttp.readyState == 4) {
+      console.log("Hiba a POST kérés során: " + xmlhttp.status);
+    }
+  };
+  // POST kérés megnyitása a megadott URL-re
+  xmlhttp.open("POST", "http://localhost:5000/api/jarmu", true);
+  xmlhttp.setRequestHeader("Content-Type", "application/json");
+  // JSON adat küldése
+  xmlhttp.send(JSON.stringify(formData));
+  document.getElementById("id").value = 0;
+  document.getElementById("marka").value = "";
+  document.getElementById("modell").value = "";
+  document.getElementById("evjarat").value = 0;
+  document.getElementById("vetelar").value = 0;
+  document.getElementById("kmallas").value = 0;
+  document.getElementById("hengerurtartalom").value = 0;
+  document.getElementById("kategoriaid").value = 0;
+  /*
+  }
+  else{
+    document.getElementById("termelo72").innerHTML = "A karton értéke nem lehet negatív!";
+  }
+  }else
+  {
+    //document.getElementById("termelo71").value="Kérem, töltse ki az összes mezőt!";
+    document.getElementById("termelo71").innerHTML = "Kérem, töltse ki az összes mezőt!";
+  } */
+}
+window.onload = function() {
+  //alert("Valami");
+  
+  const xmlhttp = new XMLHttpRequest();
+  xmlhttp.onreadystatechange = function () {
+    if (this.readyState == 4 && this.status == 200) {
+    const objektum = JSON.parse(this.responseText);
+    console.log(objektum);
+    let legordulo="<select  class='form-select' id='kategorialista'>"; 
+    for (let i = 0; i < objektum.length; i++){
+      legordulo=legordulo+ "<option value="+objektum[i].id+">"+objektum[i].kategorianev +"</option>";
+    }
+    legordulo=legordulo+"</select>";
+    document.getElementById("jarmu21").innerHTML = legordulo;
+    }
+  } 
+  xmlhttp.open("GET", "http://localhost:5000/api/kategoria", true);
+  xmlhttp.send();
+}
+
+
